@@ -17,7 +17,8 @@ UMPIRE_API_URL = "https://umpire-json-api.onrender.com"
 blogs_cache = {
     'blogs': [],
     'last_updated': None,
-    'umpires_last_updated': None
+    'umpires_last_updated': None,
+    'lineup_last_updated': None
 }
 
 def get_mlb_data():
@@ -76,16 +77,33 @@ def format_boost_percentage(multiplier_str):
     except:
         return multiplier_str
 
+def get_pitch_emoji(pitch_name):
+    """Get emoji for pitch type"""
+    pitch_emojis = {
+        'Four-Seam': '🔥',
+        'Four-Seamer': '🔥',
+        'Sinker': '💨',
+        'Cutter': '✂️',
+        'Slider': '🎯',
+        'Sweeper': '🧹',
+        'Curveball': '🌀',
+        'Changeup': '🎭',
+        'Splitter': '💧',
+        'Knuckleball': '🎲',
+        'Fastball': '🔥'
+    }
+    return pitch_emojis.get(pitch_name, '⚾')
+
 def format_pitcher_profile(pitcher_data):
-    """Create pitcher profile description"""
+    """Create pitcher profile description with emoji"""
     arsenal = pitcher_data.get('arsenal', {})
     
     if not arsenal:
-        return "Mixed arsenal"
+        return "🎯 Mixed arsenal"
     
     sorted_pitches = sorted(arsenal.items(), key=lambda x: x[1]['usage_rate'], reverse=True)
     
-    fastballs = ['Four-Seam', 'Sinker', 'Cutter']
+    fastballs = ['Four-Seam', 'Four-Seamer', 'Sinker', 'Cutter']
     breaking = ['Slider', 'Curveball', 'Sweeper']
     offspeed = ['Changeup', 'Splitter']
     
@@ -101,18 +119,18 @@ def format_pitcher_profile(pitcher_data):
     
     if 'breaking' in pitch_types:
         if pitch_types.count('breaking') > 1 or pitch_types[0] == 'breaking':
-            return "Breaking-heavy mix designed to miss bats and induce weak contact."
+            return "🎯 Breaking-heavy mix designed to miss bats and induce weak contact"
         else:
-            return "Balanced mix with emphasis on breaking balls to keep hitters off balance."
+            return "🎯 Balanced mix with emphasis on breaking balls to keep hitters off balance"
     elif 'fastball' in pitch_types:
         if pitch_types.count('fastball') > 1 or pitch_types[0] == 'fastball':
-            return "Fastball-heavy approach with emphasis on velocity and command in the zone."
+            return "🧨 Fastball-heavy attack with emphasis on velocity and command in the zone"
         else:
-            return "Power pitcher who attacks the zone with quality fastballs."
+            return "🔥 Power pitcher who attacks the zone with quality fastballs"
     elif 'offspeed' in pitch_types:
-        return "Offspeed-heavy approach designed to change eye levels and disrupt timing."
+        return "🎭 Offspeed-heavy approach designed to change eye levels and disrupt timing"
     else:
-        return "Mixed arsenal with diverse pitch types to keep hitters guessing."
+        return "🎯 Mixed arsenal with diverse pitch types to keep hitters guessing"
 
 def calculate_lineup_stats(key_matchups, pitcher_name):
     """Calculate lineup performance vs specific pitcher"""
@@ -211,7 +229,8 @@ def generate_game_blog_data(game_report, umpires):
             {
                 'name': p[1]['name'],
                 'usage': p[1]['usage_rate'] * 100,
-                'speed': p[1]['avg_speed']
+                'speed': p[1]['avg_speed'],
+                'emoji': get_pitch_emoji(p[1]['name'])
             } for p in sorted_pitches
         ]
     
@@ -222,7 +241,8 @@ def generate_game_blog_data(game_report, umpires):
             {
                 'name': p[1]['name'],
                 'usage': p[1]['usage_rate'] * 100,
-                'speed': p[1]['avg_speed']
+                'speed': p[1]['avg_speed'],
+                'emoji': get_pitch_emoji(p[1]['name'])
             } for p in sorted_pitches
         ]
     
@@ -247,12 +267,14 @@ def generate_game_blog_data(game_report, umpires):
         'away_pitcher': {
             'name': away_pitcher_display,
             'profile': format_pitcher_profile(away_pitcher_data),
-            'arsenal': away_arsenal
+            'arsenal': away_arsenal,
+            'pitch_count': len(away_arsenal)
         },
         'home_pitcher': {
             'name': home_pitcher_display,
             'profile': format_pitcher_profile(home_pitcher_data),
-            'arsenal': home_arsenal
+            'arsenal': home_arsenal,
+            'pitch_count': len(home_arsenal)
         },
         'away_lineup': away_lineup_stats,
         'home_lineup': home_lineup_stats,
@@ -260,10 +282,10 @@ def generate_game_blog_data(game_report, umpires):
     }
 
 def generate_all_blogs():
-    """Generate all game blogs and update cache"""
+    """Generate all game blogs and update cache - full refresh"""
     global blogs_cache
     
-    print(f"🚀 Generating blogs at {datetime.now()}")
+    print(f"🚀 Full blog generation at {datetime.now()}")
     
     mlb_reports = get_mlb_data()
     umpires = get_umpire_data()
@@ -286,8 +308,60 @@ def generate_all_blogs():
     blogs_cache['blogs'] = new_blogs
     blogs_cache['last_updated'] = datetime.now()
     blogs_cache['umpires_last_updated'] = datetime.now()
+    blogs_cache['lineup_last_updated'] = datetime.now()
     
     print(f"✅ Generated {len(new_blogs)} blogs")
+
+def update_lineup_and_umpire_data():
+    """Update only lineup and umpire data - hourly refresh"""
+    global blogs_cache
+    
+    if not blogs_cache['blogs']:
+        print("📝 No existing blogs to update, running full generation")
+        generate_all_blogs()
+        return
+    
+    print(f"🔄 Updating lineup and umpire data at {datetime.now()}")
+    
+    mlb_reports = get_mlb_data()
+    umpires = get_umpire_data()
+    
+    if not mlb_reports:
+        print("❌ No MLB data available for update")
+        return
+    
+    # Update existing blogs with new lineup and umpire data
+    updated_blogs = []
+    
+    for existing_blog in blogs_cache['blogs']:
+        try:
+            # Find matching game report
+            matching_report = None
+            for report in mlb_reports:
+                if report.get('matchup') == existing_blog['matchup']:
+                    matching_report = report
+                    break
+            
+            if matching_report:
+                # Regenerate blog data with fresh lineup and umpire info
+                updated_blog = generate_game_blog_data(matching_report, umpires)
+                updated_blogs.append(updated_blog)
+            else:
+                # Keep existing blog if no matching report found
+                updated_blogs.append(existing_blog)
+                
+        except Exception as e:
+            print(f"❌ Error updating blog for {existing_blog.get('matchup', 'Unknown')}: {e}")
+            # Keep existing blog on error
+            updated_blogs.append(existing_blog)
+            continue
+    
+    # Update cache
+    blogs_cache['blogs'] = updated_blogs
+    blogs_cache['umpires_last_updated'] = datetime.now()
+    blogs_cache['lineup_last_updated'] = datetime.now()
+    
+    print(f"✅ Updated lineup and umpire data for {len(updated_blogs)} games")
 
 def generate_games_html():
     """Generate HTML for all games"""
@@ -297,31 +371,31 @@ def generate_games_html():
     html_parts = []
     for blog in blogs_cache['blogs']:
         
-        # Pitching section
+        # Pitching section with emoji arsenal
         pitching_html = f'''
         <div class="section">
             <h3 class="section-title">⚾ Pitching Matchup</h3>
             <div class="pitchers-grid">
                 <div class="pitcher-card">
                     <div class="pitcher-name">{blog['away_pitcher']['name']} ({blog['away_team']})</div>
-                    <div class="pitcher-profile">{blog['away_pitcher']['profile']}</div>
+                    <div class="pitcher-profile">{blog['away_pitcher']['profile']} | {blog['away_pitcher']['pitch_count']}-pitch mix</div>
                     <ul class="arsenal-list">
         '''
         
         for pitch in blog['away_pitcher']['arsenal']:
-            pitching_html += f'<li>{pitch["name"]}: {pitch["usage"]:.0f}%, {pitch["speed"]:.1f} mph</li>'
+            pitching_html += f'<li>{pitch["emoji"]} <strong>{pitch["name"]}</strong> – {pitch["usage"]:.0f}% | {pitch["speed"]:.1f} mph</li>'
         
         pitching_html += f'''
                     </ul>
                 </div>
                 <div class="pitcher-card">
                     <div class="pitcher-name">{blog['home_pitcher']['name']} ({blog['home_team']})</div>
-                    <div class="pitcher-profile">{blog['home_pitcher']['profile']}</div>
+                    <div class="pitcher-profile">{blog['home_pitcher']['profile']} | {blog['home_pitcher']['pitch_count']}-pitch mix</div>
                     <ul class="arsenal-list">
         '''
         
         for pitch in blog['home_pitcher']['arsenal']:
-            pitching_html += f'<li>{pitch["name"]}: {pitch["usage"]:.0f}%, {pitch["speed"]:.1f} mph</li>'
+            pitching_html += f'<li>{pitch["emoji"]} <strong>{pitch["name"]}</strong> – {pitch["usage"]:.0f}% | {pitch["speed"]:.1f} mph</li>'
         
         pitching_html += '''
                     </ul>
@@ -610,6 +684,8 @@ def api_blogs():
     return {
         'blogs': blogs_cache['blogs'],
         'last_updated': blogs_cache['last_updated'].isoformat() if blogs_cache['last_updated'] else None,
+        'lineup_last_updated': blogs_cache['lineup_last_updated'].isoformat() if blogs_cache['lineup_last_updated'] else None,
+        'umpires_last_updated': blogs_cache['umpires_last_updated'].isoformat() if blogs_cache['umpires_last_updated'] else None,
         'total_games': len(blogs_cache['blogs'])
     }
 
@@ -619,6 +695,12 @@ def api_refresh():
     generate_all_blogs()
     return {'status': 'success', 'message': 'Blogs refreshed', 'total_games': len(blogs_cache['blogs'])}
 
+@app.route('/api/refresh-lineup-umpire')
+def api_refresh_lineup_umpire():
+    """API endpoint to manually refresh lineup and umpire data only"""
+    update_lineup_and_umpire_data()
+    return {'status': 'success', 'message': 'Lineup and umpire data refreshed', 'total_games': len(blogs_cache['blogs'])}
+
 @app.route('/health')
 def health():
     """Health check endpoint for Render"""
@@ -627,8 +709,8 @@ def health():
 # Background scheduler
 def run_scheduler():
     """Run the background scheduler"""
-    schedule.every().day.at("11:00").do(generate_all_blogs)  # 6 AM ET
-    schedule.every().hour.do(generate_all_blogs)  # Refresh hourly for umpire updates
+    schedule.every().day.at("11:00").do(generate_all_blogs)  # 6 AM ET - full refresh
+    schedule.every().hour.do(update_lineup_and_umpire_data)  # Hourly lineup and umpire updates
     
     while True:
         schedule.run_pending()
